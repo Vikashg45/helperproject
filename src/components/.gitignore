@@ -1,9 +1,0 @@
-/node_modules
-/dist
-/.vscode
-/src-tauri/target
-/src-tauri/.cargo
-/data.db
-backend/data/data.db
-*.log
-.DS_Store
