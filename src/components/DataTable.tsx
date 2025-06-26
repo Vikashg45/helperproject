@@ -1,74 +1,138 @@
-// components/DataTable.tsx
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useTable, useSortBy } from 'react-table';
+import { getData, RecordType } from '../utils/api';
 import {
-  useTable,
-  useSortBy,
-} from 'react-table';
-import { getData } from '../utils/api';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Pencil,
+} from 'lucide-react';
 
-interface RecordType {
-  [key: string]: string;
+interface DataTableProps {
+  reloadTrigger: number;
+  fullRecordCount: number;
 }
 
-interface ApiResponse {
-  data: RecordType[];
-  total: number;
-}
-
-const DataTable: React.FC = () => {
+const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount }) => {
   const [data, setData] = useState<RecordType[]>([]);
   const [filteredData, setFilteredData] = useState<RecordType[]>([]);
   const [page, setPage] = useState(0);
-  const [pageInput, setPageInput] = useState('');
+  const [pageSize, setPageSize] = useState(20);
   const [columnSearch, setColumnSearch] = useState<Record<string, string>>({});
-  const limit = 20;
+  const [editingRow, setEditingRow] = useState<RecordType | null>(null);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
 
-  const fetchData = useCallback(() => {
-    getData(1, 20000, '')
-      .then((json: ApiResponse) => {
-        setData(json.data || []);
-      })
-      .catch((err) => {
-        console.error('❌ Error fetching data:', err);
-        setData([]);
-      });
+  const fetchData = useCallback(async () => {
+    try {
+      const response = await getData(1, 20000, '');
+      setData(response.data || []);
+    } catch (err) {
+      console.error('❌ Error fetching data:', err);
+      setData([]);
+    }
   }, []);
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, [fetchData]);
 
   useEffect(() => {
-    const filtered = data.filter((row) => {
-      return Object.entries(columnSearch).every(([key, searchValue]) => {
-        return row[key]?.toLowerCase().includes(searchValue.toLowerCase());
-      });
-    });
+    const filtered = data.filter((row) =>
+      Object.entries(columnSearch).every(([key, searchValue]) =>
+        row[key]?.toLowerCase().includes(searchValue.toLowerCase())
+      )
+    );
     setFilteredData(filtered);
     setPage(0);
   }, [data, columnSearch]);
 
   const paginatedData = useMemo(
-    () => filteredData.slice(page * limit, (page + 1) * limit),
-    [filteredData, page, limit]
+    () => filteredData.slice(page * pageSize, (page + 1) * pageSize),
+    [filteredData, page, pageSize]
   );
+
+  const handleEditRow = (row: RecordType) => {
+    setEditingRow(row);
+    setEditValues({ ...row });
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      if (!editValues.id) {
+        alert('❌ Cannot update record without an ID');
+        return;
+      }
+      const res = await fetch('http://localhost:3001/api/update-record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editValues),
+      });
+      if (res.ok) {
+        alert('✅ Record updated successfully');
+        setEditingRow(null);
+        fetchData();
+      } else {
+        const text = await res.text();
+        alert('❌ Failed to update record: ' + text);
+      }
+    } catch (error) {
+      console.error('❌ Update error:', error);
+      alert('❌ An error occurred while updating');
+    }
+  };
 
   const columns = useMemo(() => {
     if (paginatedData.length === 0) return [];
     const dynamicCols = Object.keys(paginatedData[0]).map((key) => ({
-      Header: key.toUpperCase(),
+      Header: () => (
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-gray-700 uppercase">{key.toUpperCase()}</span>
+          <input
+            type="text"
+            placeholder="Search"
+            value={columnSearch[key] || ''}
+            onChange={(e) =>
+              setColumnSearch((prev) => ({ ...prev, [key]: e.target.value }))
+            }
+            className="w-full px-2 py-1 border rounded text-sm"
+          />
+        </div>
+      ),
       accessor: key,
     }));
+
     return [
       {
-        Header: 'S.No',
+        Header: () => (
+          <div className="text-xs font-semibold text-gray-700 uppercase">S.No</div>
+        ),
         accessor: 'serial',
-        Cell: ({ row }: any) => page * limit + row.index + 1,
+        Cell: ({ row }: any) => page * pageSize + row.index + 1,
       },
       ...dynamicCols,
+      {
+        Header: () => (
+          <div className="flex items-center gap-1 text-xs font-semibold text-gray-700 uppercase">
+            <Pencil className="w-4 h-4 text-gray-600" />
+            Actions
+          </div>
+        ),
+        accessor: 'actions',
+        Cell: ({ row }: any) => (
+          <button
+            onClick={() => handleEditRow(row.original)}
+            className="inline-flex items-center gap-1 text-xs text-violet-700 border border-violet-200 bg-violet-50 px-2 py-1 rounded hover:bg-violet-100"
+          >
+            <Pencil className="w-4 h-4" />
+            Edit
+          </button>
+        ),
+      },
     ];
-  }, [paginatedData, page]);
+  }, [paginatedData, page, pageSize, columnSearch]);
 
   const {
     getTableProps,
@@ -76,157 +140,127 @@ const DataTable: React.FC = () => {
     headerGroups,
     prepareRow,
     rows,
-  } = useTable(
-    {
-      columns,
-      data: paginatedData,
-    },
-    useSortBy
-  );
+  } = useTable({ columns, data: paginatedData }, useSortBy);
 
-  const totalPages = Math.ceil(filteredData.length / limit);
-
-  const handlePageInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPageInput(e.target.value);
-  };
-
-  const jumpToPage = () => {
-    const targetPage = parseInt(pageInput);
-    if (!isNaN(targetPage) && targetPage > 0 && targetPage <= totalPages) {
-      setPage(targetPage - 1);
-      setPageInput('');
-    }
-  };
+  const totalPages = Math.ceil(filteredData.length / pageSize);
 
   return (
-    <div className="w-full px-4 py-6 space-y-6 bg-white rounded-xl shadow-sm">
-      {/* Table */}
+    <div className="w-full px-4 py-6 bg-white rounded-xl shadow">
       <div className="overflow-x-auto max-h-[70vh] overflow-y-auto border rounded-lg">
         <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
-            {headerGroups.map((headerGroup: any, i: any) => (
-              <React.Fragment key={`header-group-${i}`}>
-                <tr {...headerGroup.getHeaderGroupProps()}>
-                  {headerGroup.headers.map((column: any, j: any) => (
-                    <th
-                      {...column.getHeaderProps((column as any).getSortByToggleProps())}
-                      key={`head-col-${j}`}
-                      className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider select-none cursor-pointer"
-                    >
-                      {column.render('Header')}
-                      {(column as any).isSorted ? (
-                        (column as any).isSortedDesc ? ' 🔽' : ' 🔼'
-                      ) : ''}
-                    </th>
-                  ))}
-                </tr>
-                <tr>
-                  {headerGroup.headers.map((column: any, j: any) => (
-                    <th key={`search-col-${j}`} className="px-3 py-1">
-                      {column.id !== 'serial' && (
-                        <input
-                          type="text"
-                          value={columnSearch[column.id] || ''}
-                          onChange={(e) =>
-                            setColumnSearch((prev) => ({
-                              ...prev,
-                              [column.id]: e.target.value,
-                            }))
-                          }
-                          placeholder={`Search ${column.id}`}
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-violet-500 focus:outline-none"
-                        />
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </React.Fragment>
+          <thead className="bg-gray-50 sticky top-0 z-10">
+            {headerGroups.map((headerGroup, i) => (
+              <tr {...headerGroup.getHeaderGroupProps()} key={i}>
+                {headerGroup.headers.map((column, j) => (
+                  <th
+                    {...column.getHeaderProps((column as any).getSortByToggleProps?.())}
+                    key={j}
+                    className="px-3 py-2 text-left align-top"
+                  >
+                    {column.render('Header')}
+                    {(column as any).isSorted
+                      ? (column as any).isSortedDesc
+                        ? ' 🔽'
+                        : ' 🔼'
+                      : ''}
+                  </th>
+                ))}
+              </tr>
             ))}
           </thead>
           <tbody {...getTableBodyProps()} className="bg-white divide-y divide-gray-100">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="text-center py-8 text-sm text-gray-500">
-                  No data found.
-                </td>
-              </tr>
-            ) : (
-              rows.map((row: any, rowIndex: any) => {
-                prepareRow(row);
-                return (
-                  <tr
-                    {...row.getRowProps()}
-                    key={`row-${rowIndex}`}
-                    className="hover:bg-violet-50 transition duration-100"
-                  >
-                    {row.cells.map((cell: any, cellIndex: any) => (
-                      <td
-                        {...cell.getCellProps()}
-                        key={`cell-${rowIndex}-${cellIndex}`}
-                        className="px-3 py-2 text-sm text-gray-700 whitespace-nowrap"
-                      >
-                        {cell.render('Cell')}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })
-            )}
+            {rows.map((row, rowIndex) => {
+              prepareRow(row);
+              return (
+                <tr {...row.getRowProps()} key={rowIndex}>
+                  {row.cells.map((cell, cellIndex) => (
+                    <td
+                      {...cell.getCellProps()}
+                      key={cellIndex}
+                      className="px-3 py-2 text-sm text-gray-700"
+                    >
+                      {cell.render('Cell')}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination Bottom Center */}
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-4">
+      {/* Pagination Controls */}
+      <div className="flex flex-wrap justify-between items-center mt-4 gap-2">
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPage(0)}
-            disabled={page === 0}
-            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
+          <label className="text-sm font-medium">Rows:</label>
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(0);
+            }}
+            className="border rounded px-2 py-1 text-sm"
           >
-            <ChevronsLeft className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
-            disabled={page === 0}
-            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center px-2 text-sm text-gray-600">
-            Page <span className="font-semibold px-1">{page + 1}</span> of <span className="font-semibold px-1">{totalPages || 1}</span>
-          </div>
-          <button
-            onClick={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
-            disabled={page >= totalPages - 1}
-            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => setPage(totalPages - 1)}
-            disabled={page >= totalPages - 1}
-            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-          >
-            <ChevronsRight className="w-5 h-5" />
-          </button>
+            {[10, 20, 50, 100].map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="flex gap-2 items-center">
-          <input
-            type="number"
-            value={pageInput}
-            onChange={handlePageInput}
-            placeholder="Go to page"
-            className="w-24 px-2 py-1 border rounded text-sm"
-          />
-          <button
-            onClick={jumpToPage}
-            className="px-3 py-1 bg-violet-600 text-white rounded text-sm hover:bg-violet-700"
-          >
-            Go
+
+        <div className="flex items-center gap-2">
+          <button onClick={() => setPage(0)} disabled={page === 0}>
+            <ChevronsLeft className="w-4 h-4" />
+          </button>
+          <button onClick={() => setPage((p) => Math.max(p - 1, 0))} disabled={page === 0}>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm">
+            Page <b>{page + 1}</b> of <b>{totalPages || 1}</b>
+          </span>
+          <button onClick={() => setPage((p) => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <button onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
+            <ChevronsRight className="w-4 h-4" />
           </button>
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {editingRow && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full">
+            <h3 className="text-lg font-bold mb-4">Edit Record</h3>
+            {Object.keys(editingRow).map((key) => (
+              <div key={key} className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">{key}</label>
+                <input
+                  type="text"
+                  value={editValues[key] || ''}
+                  onChange={(e) => setEditValues({ ...editValues, [key]: e.target.value })}
+                  className="w-full border px-3 py-1 rounded text-sm focus:ring focus:ring-violet-300"
+                />
+              </div>
+            ))}
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={() => setEditingRow(null)}
+                className="text-sm px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="text-sm px-3 py-1 bg-violet-600 text-white rounded hover:bg-violet-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

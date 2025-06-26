@@ -1,15 +1,26 @@
-// utils/api.js
-import axios from 'axios';
+export interface RecordType {
+  [key: string]: string;
+}
 
-const API_BASE = 'http://localhost:3001/api';
+export interface ApiResponse {
+  data: RecordType[];
+  total: number;
+}
 
-export const getData = async (page = 1, limit = 100, search = '') => {
+export const getData = async (
+  page: number,
+  limit: number,
+  search: string
+): Promise<ApiResponse> => {
   const params = new URLSearchParams({
     page: page.toString(),
     limit: limit.toString(),
     search,
   });
 
-  const response = await axios.get(`${API_BASE}/data?${params.toString()}`);
-  return response.data;
+  const res = await fetch(`http://localhost:3001/api/data?${params.toString()}`);
+
+  if (!res.ok) throw new Error('Failed to fetch data');
+
+  return res.json();
 };
