@@ -5,7 +5,7 @@ import {
   useSortBy,
 } from 'react-table';
 import { getData } from '../utils/api';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 interface RecordType {
   [key: string]: string;
@@ -20,7 +20,8 @@ const DataTable: React.FC = () => {
   const [data, setData] = useState<RecordType[]>([]);
   const [filteredData, setFilteredData] = useState<RecordType[]>([]);
   const [page, setPage] = useState(0);
-  const [search, setSearch] = useState('');
+  const [pageInput, setPageInput] = useState('');
+  const [columnSearch, setColumnSearch] = useState<Record<string, string>>({});
   const limit = 20;
 
   const fetchData = useCallback(() => {
@@ -39,12 +40,14 @@ const DataTable: React.FC = () => {
   }, [fetchData]);
 
   useEffect(() => {
-    const filtered = data.filter((item) =>
-      item.f1?.toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = data.filter((row) => {
+      return Object.entries(columnSearch).every(([key, searchValue]) => {
+        return row[key]?.toLowerCase().includes(searchValue.toLowerCase());
+      });
+    });
     setFilteredData(filtered);
     setPage(0);
-  }, [data, search]);
+  }, [data, columnSearch]);
 
   const paginatedData = useMemo(
     () => filteredData.slice(page * limit, (page + 1) * limit),
@@ -83,48 +86,61 @@ const DataTable: React.FC = () => {
 
   const totalPages = Math.ceil(filteredData.length / limit);
 
-  const onSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value);
+  const handlePageInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPageInput(e.target.value);
+  };
+
+  const jumpToPage = () => {
+    const targetPage = parseInt(pageInput);
+    if (!isNaN(targetPage) && targetPage > 0 && targetPage <= totalPages) {
+      setPage(targetPage - 1);
+      setPageInput('');
+    }
   };
 
   return (
     <div className="w-full px-4 py-6 space-y-6 bg-white rounded-xl shadow-sm">
-      {/* Search and page info */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="relative w-full sm:w-1/3">
-          <Search className="absolute left-3 top-2.5 text-gray-400 h-5 w-5" />
-          <input
-            type="text"
-            placeholder="Search by f1..."
-            value={search}
-            onChange={onSearchChange}
-            className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none"
-          />
-        </div>
-        <div className="text-sm text-gray-600">
-          Showing page <span className="font-semibold">{page + 1}</span> of <span className="font-semibold">{totalPages || 1}</span>
-        </div>
-      </div>
-
       {/* Table */}
       <div className="overflow-x-auto max-h-[70vh] overflow-y-auto border rounded-lg">
         <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
-            {headerGroups.map((headerGroup:any, i:any) => (
-              <tr {...headerGroup.getHeaderGroupProps()} key={`header-${i}`}>
-                {headerGroup.headers.map((column:any, j:any) => (
-                  <th
-                    {...column.getHeaderProps((column as any).getSortByToggleProps())}
-                    key={`head-col-${j}`}
-                    className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider select-none cursor-pointer"
-                  >
-                    {column.render('Header')}
-                    {(column as any).isSorted ? (
-                      (column as any).isSortedDesc ? ' 🔽' : ' 🔼'
-                    ) : ''}
-                  </th>
-                ))}
-              </tr>
+            {headerGroups.map((headerGroup: any, i: any) => (
+              <React.Fragment key={`header-group-${i}`}>
+                <tr {...headerGroup.getHeaderGroupProps()}>
+                  {headerGroup.headers.map((column: any, j: any) => (
+                    <th
+                      {...column.getHeaderProps((column as any).getSortByToggleProps())}
+                      key={`head-col-${j}`}
+                      className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider select-none cursor-pointer"
+                    >
+                      {column.render('Header')}
+                      {(column as any).isSorted ? (
+                        (column as any).isSortedDesc ? ' 🔽' : ' 🔼'
+                      ) : ''}
+                    </th>
+                  ))}
+                </tr>
+                <tr>
+                  {headerGroup.headers.map((column: any, j: any) => (
+                    <th key={`search-col-${j}`} className="px-3 py-1">
+                      {column.id !== 'serial' && (
+                        <input
+                          type="text"
+                          value={columnSearch[column.id] || ''}
+                          onChange={(e) =>
+                            setColumnSearch((prev) => ({
+                              ...prev,
+                              [column.id]: e.target.value,
+                            }))
+                          }
+                          placeholder={`Search ${column.id}`}
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-violet-500 focus:outline-none"
+                        />
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </React.Fragment>
             ))}
           </thead>
           <tbody {...getTableBodyProps()} className="bg-white divide-y divide-gray-100">
@@ -135,7 +151,7 @@ const DataTable: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              rows.map((row:any, rowIndex:any) => {
+              rows.map((row: any, rowIndex: any) => {
                 prepareRow(row);
                 return (
                   <tr
@@ -143,7 +159,7 @@ const DataTable: React.FC = () => {
                     key={`row-${rowIndex}`}
                     className="hover:bg-violet-50 transition duration-100"
                   >
-                    {row.cells.map((cell:any, cellIndex:any) => (
+                    {row.cells.map((cell: any, cellIndex: any) => (
                       <td
                         {...cell.getCellProps()}
                         key={`cell-${rowIndex}-${cellIndex}`}
@@ -160,36 +176,56 @@ const DataTable: React.FC = () => {
         </table>
       </div>
 
-      {/* Pagination */}
-      <div className="flex justify-center gap-3 pt-2">
-        <button
-          onClick={() => setPage(0)}
-          disabled={page === 0}
-          className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-        >
-          <ChevronsLeft className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
-          disabled={page === 0}
-          className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
-          disabled={page >= totalPages - 1}
-          className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => setPage(totalPages - 1)}
-          disabled={page >= totalPages - 1}
-          className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
-        >
-          <ChevronsRight className="w-5 h-5" />
-        </button>
+      {/* Pagination Bottom Center */}
+      <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-4">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPage(0)}
+            disabled={page === 0}
+            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
+          >
+            <ChevronsLeft className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
+            disabled={page === 0}
+            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <div className="flex items-center px-2 text-sm text-gray-600">
+            Page <span className="font-semibold px-1">{page + 1}</span> of <span className="font-semibold px-1">{totalPages || 1}</span>
+          </div>
+          <button
+            onClick={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
+            disabled={page >= totalPages - 1}
+            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setPage(totalPages - 1)}
+            disabled={page >= totalPages - 1}
+            className="p-2 rounded-full hover:bg-gray-200 disabled:opacity-50"
+          >
+            <ChevronsRight className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex gap-2 items-center">
+          <input
+            type="number"
+            value={pageInput}
+            onChange={handlePageInput}
+            placeholder="Go to page"
+            className="w-24 px-2 py-1 border rounded text-sm"
+          />
+          <button
+            onClick={jumpToPage}
+            className="px-3 py-1 bg-violet-600 text-white rounded text-sm hover:bg-violet-700"
+          >
+            Go
+          </button>
+        </div>
       </div>
     </div>
   );
