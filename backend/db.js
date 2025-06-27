@@ -1,87 +1,43 @@
 const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('./data.db');
+const path = require('path');
 
-function parseAndStoreData(content) {
+const dbPath = path.join(__dirname, 'database.db');
+const db = new sqlite3.Database(dbPath);
+
+// Automatically creates table based on the first row (headers)
+async function parseAndStoreData(content) {
   return new Promise((resolve, reject) => {
-    try {
-      const lines = content
-        .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean);
+    const lines = content.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length < 2) return reject(new Error('File must include at least a header and one data row.'));
 
-      if (lines.length < 2) return reject("❌ File must contain at least one data row.");
+    const headers = lines[0].split('|').map(h => h.trim());
+    const columnDefs = headers.map(h => `\`${h}\` TEXT`).join(', ');
+    const placeholders = headers.map(() => '?').join(', ');
+    const insertStmt = `INSERT INTO records (${headers.map(h => `\`${h}\``).join(', ')}) VALUES (${placeholders})`;
 
-      const headers = lines[0].replace(/^(\|)+|(\|)+$/g, '').split('|').map(h => h.trim());
+    db.serialize(() => {
+      // Create table if not exists (drops old if necessary — optional)
+      db.run(`DROP TABLE IF EXISTS records`);
+      db.run(`CREATE TABLE records (id INTEGER PRIMARY KEY AUTOINCREMENT, ${columnDefs})`, (err) => {
+        if (err) return reject(err);
 
-      if (headers.length !== 86) return reject(`❌ Header must contain 86 columns. Found: ${headers.length}`);
-
-      const tableName = 'records';
-      const userColumns = headers.map(col => `${col} TEXT`).join(', ');
-
-      db.serialize(() => {
-        // Create table with `id` column
-        const createTableSQL = `
-          CREATE TABLE IF NOT EXISTS ${tableName} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ${userColumns}
-          )
-        `;
-
-        db.run(createTableSQL, (err) => {
-          if (err) {
-            console.error("❌ Table creation error:", err);
-            return reject("❌ Failed to create table: " + err.message);
+        const stmt = db.prepare(insertStmt);
+        for (let i = 1; i < lines.length; i++) {
+          const row = lines[i].split('|').map(cell => cell.trim());
+          if (row.length === headers.length) {
+            stmt.run(row);
           }
-
-          console.log("✅ Table created or exists with headers:", headers);
-
-          db.run(`DELETE FROM ${tableName}`, (deleteErr) => {
-            if (deleteErr && !deleteErr.message.includes('no such table')) {
-              console.error("❌ Delete error:", deleteErr);
-              return reject("❌ Failed to clear old data: " + deleteErr.message);
-            }
-
-            console.log("✅ Old data cleared");
-
-            const insertStmt = db.prepare(
-              `INSERT INTO ${tableName} (${headers.join(',')}) VALUES (${headers.map(() => '?').join(',')})`
-            );
-
-            let insertedCount = 0;
-
-            for (let i = 1; i < lines.length; i++) {
-              const values = lines[i].replace(/^(\|)+|(\|)+$/g, '').split('|').map(v => v.trim() || null);
-
-              if (values.length !== 86) {
-                console.warn(`⚠️ Skipping line ${i + 1}: Expected 86 values, found ${values.length}`);
-                continue;
-              }
-
-              insertStmt.run(values, (err) => {
-                if (err) {
-                  console.error(`❌ Error inserting row ${i + 1}:`, err.message);
-                } else {
-                  insertedCount++;
-                }
-              });
-            }
-
-            insertStmt.finalize((err) => {
-              if (err) {
-                console.error("❌ Finalize error:", err);
-                return reject("❌ Error finalizing insert: " + err.message);
-              }
-              console.log(`✅ Total inserted rows: ${insertedCount}`);
-              resolve();
-            });
-          });
+        }
+        stmt.finalize((err) => {
+          if (err) reject(err);
+          else resolve();
         });
       });
-    } catch (e) {
-      console.error("❌ Parsing error:", e);
-      reject("❌ Error parsing content: " + e.message);
-    }
+    });
   });
 }
 
-module.exports = { db, parseAndStoreData };
+module.exports = {
+  db,
+  parseAndStoreData,
+};

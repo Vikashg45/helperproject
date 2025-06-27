@@ -1,138 +1,131 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useTable, useSortBy } from 'react-table';
-import { getData, RecordType } from '../utils/api';
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Pencil,
-} from 'lucide-react';
+import { useTable, useSortBy, Column } from 'react-table';
+import { ChevronUp, ChevronDown } from 'lucide-react';
+import { RecordType } from '../utils/api';
 
-interface DataTableProps {
-  reloadTrigger: number;
-  fullRecordCount: number;
-}
-
-const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount }) => {
+const DataTable: React.FC = () => {
   const [data, setData] = useState<RecordType[]>([]);
-  const [filteredData, setFilteredData] = useState<RecordType[]>([]);
+  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
+  const [gotoPage, setGotoPage] = useState('');
   const [columnSearch, setColumnSearch] = useState<Record<string, string>>({});
-  const [editingRow, setEditingRow] = useState<RecordType | null>(null);
-  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [editedCells, setEditedCells] = useState<Record<string, string>>({});
+  const [editingCell, setEditingCell] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const response = await getData(1, 20000, '');
-      setData(response.data || []);
+      const searchQuery = ''; // Extend for global search
+      const response = await fetch(
+        `http://localhost:3001/api/data?limit=${pageSize}&offset=${page * pageSize}&search=${searchQuery}`
+      );
+      const result = await response.json();
+      setData(result.data || []);
+      setTotal(result.total || 0);
     } catch (err) {
       console.error('❌ Error fetching data:', err);
       setData([]);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
   }, [fetchData]);
 
-  useEffect(() => {
-    const filtered = data.filter((row) =>
-      Object.entries(columnSearch).every(([key, searchValue]) =>
-        row[key]?.toLowerCase().includes(searchValue.toLowerCase())
-      )
-    );
-    setFilteredData(filtered);
-    setPage(0);
-  }, [data, columnSearch]);
-
-  const paginatedData = useMemo(
-    () => filteredData.slice(page * pageSize, (page + 1) * pageSize),
-    [filteredData, page, pageSize]
-  );
-
-  const handleEditRow = (row: RecordType) => {
-    setEditingRow(row);
-    setEditValues({ ...row });
+  const handleEdit = (rowId: string, columnId: string, value: string) => {
+    const key = `${rowId}_${columnId}`;
+    setEditedCells((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveEdit = async () => {
+  const handleSave = async () => {
+    const updatedRows: Record<string, any> = {};
+
+    Object.keys(editedCells).forEach((key) => {
+      const [id, column] = key.split('_');
+      if (!updatedRows[id]) updatedRows[id] = { id };
+      updatedRows[id][column] = editedCells[key];
+    });
+
     try {
-      if (!editValues.id) {
-        alert('❌ Cannot update record without an ID');
-        return;
+      for (const row of Object.values(updatedRows)) {
+        const response = await fetch('http://localhost:3001/api/update-record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(row),
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Update failed');
       }
-      const res = await fetch('http://localhost:3001/api/update-record', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editValues),
-      });
-      if (res.ok) {
-        alert('✅ Record updated successfully');
-        setEditingRow(null);
-        fetchData();
-      } else {
-        const text = await res.text();
-        alert('❌ Failed to update record: ' + text);
-      }
-    } catch (error) {
-      console.error('❌ Update error:', error);
-      alert('❌ An error occurred while updating');
+
+      setEditedCells({});
+      setEditingCell(null);
+      fetchData();
+    } catch (err) {
+      console.error('❌ Save failed:', err);
+      alert('Save failed. Check console.');
     }
   };
 
-  const columns = useMemo(() => {
-    if (paginatedData.length === 0) return [];
-    const dynamicCols = Object.keys(paginatedData[0]).map((key) => ({
+  const handleDownload = () => {
+    const blob = new Blob([data.map((row) => Object.values(row).join(',')).join('\n')], {
+      type: 'text/plain;charset=utf-8',
+    });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'updated_data.txt';
+    link.click();
+  };
+
+  const columns: Column<RecordType>[] = useMemo(() => {
+    if (data.length === 0) return [];
+    return Object.keys(data[0]).map((key) => ({
       Header: () => (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-gray-700 uppercase">{key.toUpperCase()}</span>
+        <div className="flex flex-col">
+          <span className="flex items-center gap-1">
+            {key.toUpperCase()}
+            <ChevronUp className="w-3 h-3 text-gray-500 inline-block" />
+            <ChevronDown className="w-3 h-3 text-gray-500 inline-block -mt-1" />
+          </span>
           <input
             type="text"
-            placeholder="Search"
+            placeholder={`Search ${key}`}
             value={columnSearch[key] || ''}
             onChange={(e) =>
               setColumnSearch((prev) => ({ ...prev, [key]: e.target.value }))
             }
-            className="w-full px-2 py-1 border rounded text-sm"
+            className="text-xs border px-1 py-0.5 mt-1 rounded"
           />
         </div>
       ),
       accessor: key,
-    }));
+      Cell: ({ value, row }: any) => {
+        const rowId = row.original.id || row.index;
+        const cellKey = `${rowId}_${key}`;
+        const editedValue = editedCells[cellKey];
+        const displayValue = editedValue !== undefined ? editedValue : value;
 
-    return [
-      {
-        Header: () => (
-          <div className="text-xs font-semibold text-gray-700 uppercase">S.No</div>
-        ),
-        accessor: 'serial',
-        Cell: ({ row }: any) => page * pageSize + row.index + 1,
-      },
-      ...dynamicCols,
-      {
-        Header: () => (
-          <div className="flex items-center gap-1 text-xs font-semibold text-gray-700 uppercase">
-            <Pencil className="w-4 h-4 text-gray-600" />
-            Actions
-          </div>
-        ),
-        accessor: 'actions',
-        Cell: ({ row }: any) => (
-          <button
-            onClick={() => handleEditRow(row.original)}
-            className="inline-flex items-center gap-1 text-xs text-violet-700 border border-violet-200 bg-violet-50 px-2 py-1 rounded hover:bg-violet-100"
+        return (
+          <div
+            onClick={() => setEditingCell(cellKey)}
+            className={`relative ${editedValue !== undefined ? 'bg-green-100' : ''}`}
           >
-            <Pencil className="w-4 h-4" />
-            Edit
-          </button>
-        ),
+            {editingCell === cellKey ? (
+              <input
+                className="text-sm border p-1 w-full"
+                value={displayValue}
+                onChange={(e) => handleEdit(rowId, key, e.target.value)}
+                onBlur={() => setEditingCell(null)}
+                autoFocus
+              />
+            ) : (
+              <span className="text-sm cursor-pointer">{displayValue}</span>
+            )}
+          </div>
+        );
       },
-    ];
-  }, [paginatedData, page, pageSize, columnSearch]);
+    }));
+  }, [data, editedCells, editingCell, columnSearch]);
 
   const {
     getTableProps,
@@ -140,12 +133,27 @@ const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount })
     headerGroups,
     prepareRow,
     rows,
-  } = useTable({ columns, data: paginatedData }, useSortBy);
+  } = useTable({ columns, data }, useSortBy);
 
-  const totalPages = Math.ceil(filteredData.length / pageSize);
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="w-full px-4 py-6 bg-white rounded-xl shadow">
+    <div className="w-full px-4 py-6 bg-white rounded-xl shadow space-y-4">
+      <div className="flex gap-4">
+        <button
+          onClick={handleSave}
+          className="bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200 text-sm font-medium"
+        >
+          Save
+        </button>
+        <button
+          onClick={handleDownload}
+          className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded hover:bg-yellow-200 text-sm font-medium"
+        >
+          Download
+        </button>
+      </div>
+
       <div className="overflow-x-auto max-h-[70vh] overflow-y-auto border rounded-lg">
         <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0 z-10">
@@ -155,14 +163,9 @@ const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount })
                   <th
                     {...column.getHeaderProps((column as any).getSortByToggleProps?.())}
                     key={j}
-                    className="px-3 py-2 text-left align-top"
+                    className="px-3 py-2 text-left text-xs font-semibold text-gray-700"
                   >
                     {column.render('Header')}
-                    {(column as any).isSorted
-                      ? (column as any).isSortedDesc
-                        ? ' 🔽'
-                        : ' 🔼'
-                      : ''}
                   </th>
                 ))}
               </tr>
@@ -177,7 +180,7 @@ const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount })
                     <td
                       {...cell.getCellProps()}
                       key={cellIndex}
-                      className="px-3 py-2 text-sm text-gray-700"
+                      className="px-3 py-2"
                     >
                       {cell.render('Cell')}
                     </td>
@@ -190,18 +193,20 @@ const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount })
       </div>
 
       {/* Pagination Controls */}
-      <div className="flex flex-wrap justify-between items-center mt-4 gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 text-sm text-gray-700">
+        {/* Page size selector */}
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium">Rows:</label>
+          <label htmlFor="pageSize">Rows per page:</label>
           <select
+            id="pageSize"
+            className="border px-2 py-1 rounded"
             value={pageSize}
             onChange={(e) => {
               setPageSize(Number(e.target.value));
               setPage(0);
             }}
-            className="border rounded px-2 py-1 text-sm"
           >
-            {[10, 20, 50, 100].map((size) => (
+            {[10, 20, 50, 100, 200].map((size) => (
               <option key={size} value={size}>
                 {size}
               </option>
@@ -209,58 +214,70 @@ const DataTable: React.FC<DataTableProps> = ({ reloadTrigger, fullRecordCount })
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button onClick={() => setPage(0)} disabled={page === 0}>
-            <ChevronsLeft className="w-4 h-4" />
+        {/* Center pagination */}
+        <div className="flex items-center gap-2 mx-auto">
+          <button
+            onClick={() => setPage(0)}
+            disabled={page === 0}
+            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
+          >
+            ⏮️
           </button>
-          <button onClick={() => setPage((p) => Math.max(p - 1, 0))} disabled={page === 0}>
-            <ChevronLeft className="w-4 h-4" />
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
+          >
+            ◀️
           </button>
-          <span className="text-sm">
-            Page <b>{page + 1}</b> of <b>{totalPages || 1}</b>
+
+          <span className="font-medium">
+            Page {page + 1} of {totalPages}
           </span>
-          <button onClick={() => setPage((p) => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}>
-            <ChevronRight className="w-4 h-4" />
+
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page + 1 >= totalPages}
+            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
+          >
+            ▶️
           </button>
-          <button onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
-            <ChevronsRight className="w-4 h-4" />
+          <button
+            onClick={() => setPage(totalPages - 1)}
+            disabled={page + 1 >= totalPages}
+            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
+          >
+            ⏭️
+          </button>
+        </div>
+
+        {/* Manual go to page */}
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={gotoPage}
+            onChange={(e) => setGotoPage(e.target.value)}
+            className="w-16 px-2 py-1 border rounded text-sm"
+            placeholder="Go to"
+          />
+          <button
+            onClick={() => {
+              const parsed = parseInt(gotoPage);
+              if (!isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
+                setPage(parsed - 1);
+                setGotoPage('');
+              } else {
+                alert('Invalid page number');
+              }
+            }}
+            className="px-2 py-1 bg-blue-50 hover:bg-blue-200 text-blue-800 rounded text-sm font-medium"
+          >
+            Go
           </button>
         </div>
       </div>
-
-      {/* Edit Modal */}
-      {editingRow && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full">
-            <h3 className="text-lg font-bold mb-4">Edit Record</h3>
-            {Object.keys(editingRow).map((key) => (
-              <div key={key} className="mb-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">{key}</label>
-                <input
-                  type="text"
-                  value={editValues[key] || ''}
-                  onChange={(e) => setEditValues({ ...editValues, [key]: e.target.value })}
-                  className="w-full border px-3 py-1 rounded text-sm focus:ring focus:ring-violet-300"
-                />
-              </div>
-            ))}
-            <div className="flex justify-end gap-3 mt-4">
-              <button
-                onClick={() => setEditingRow(null)}
-                className="text-sm px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveEdit}
-                className="text-sm px-3 py-1 bg-violet-600 text-white rounded hover:bg-violet-700"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

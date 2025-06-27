@@ -19,7 +19,8 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
       setRecordCount(data.count);
 
       if (!isUploading) {
-        if (data.count >= 10000) setProgress(50);
+        if (data.count >= 15000) setProgress(75);
+        else if (data.count >= 10000) setProgress(50);
         else if (data.count >= 5000) setProgress(25);
         else setProgress(0);
       }
@@ -41,18 +42,6 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
     }
   };
 
-  const simulateProgress = () => {
-    let fakeProgress = 0;
-    const interval = setInterval(() => {
-      if (fakeProgress >= 80 || !isUploading) {
-        clearInterval(interval);
-        return;
-      }
-      fakeProgress += Math.floor(Math.random() * 10) + 5;
-      setProgress(Math.min(fakeProgress, 80));
-    }, 300);
-  };
-
   const handleUpload = async () => {
     if (!file) {
       setMessage('❌ Please select a file.');
@@ -63,9 +52,9 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
     formData.append('file', file);
 
     try {
+      setMessage('');
       setIsUploading(true);
       setProgress(0);
-      simulateProgress();
 
       const res = await fetch('http://localhost:3001/api/upload-file', {
         method: 'POST',
@@ -75,6 +64,7 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
       const text = await res.text();
       setMessage(text);
 
+      await new Promise((resolve) => setTimeout(resolve, 800)); // short delay before polling again
       await fetchRecordCount();
       onUpload();
     } catch (err) {
@@ -84,12 +74,13 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
       setIsUploading(false);
       setProgress(100);
       setShowFinalProgress(true);
-      setTimeout(() => setShowFinalProgress(false), 10000);
+      setTimeout(() => setShowFinalProgress(false), 4000);
     }
   };
 
   const deleteData = async () => {
     try {
+      setMessage('');
       const res = await fetch('http://localhost:3001/api/delete-data', {
         method: 'DELETE',
       });
@@ -99,6 +90,7 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
       setFile(null);
       (document.querySelector('input[type="file"]') as HTMLInputElement).value = '';
 
+      await new Promise((resolve) => setTimeout(resolve, 800)); // short delay
       await fetchRecordCount();
       onUpload();
     } catch (err) {
