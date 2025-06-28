@@ -1,24 +1,53 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useTable, useSortBy, Column } from 'react-table';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+// ✅ Your imports remain unchanged
+import { useEffect, useState, useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
+import { useTable, Column } from 'react-table';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { RecordType } from '../utils/api';
 
-const DataTable: React.FC = () => {
+export interface DataTableHandle {
+  refresh: () => void;
+}
+
+const DataTable = forwardRef<DataTableHandle>((_, ref) => {
   const [data, setData] = useState<RecordType[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
   const [gotoPage, setGotoPage] = useState('');
   const [columnSearch, setColumnSearch] = useState<Record<string, string>>({});
+  const [sortColumn, setSortColumn] = useState('');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editedCells, setEditedCells] = useState<Record<string, string>>({});
   const [editingCell, setEditingCell] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const pageRef = useRef(page);
+  const pageSizeRef = useRef(pageSize);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => { pageRef.current = page }, [page]);
+  useEffect(() => { pageSizeRef.current = pageSize }, [pageSize]);
+
+  const fetchData = async () => {
     try {
-      const searchQuery = ''; // Extend for global search
-      const response = await fetch(
-        `http://localhost:3001/api/data?limit=${pageSize}&offset=${page * pageSize}&search=${searchQuery}`
-      );
+      const currentPage = pageRef.current;
+      const currentPageSize = pageSizeRef.current;
+      const params = new URLSearchParams();
+
+      Object.entries(columnSearch).forEach(([key, value]) => {
+        if (value?.trim()) params.append(key, value);
+      });
+
+      if (sortColumn) {
+        params.append('sortColumn', sortColumn);
+        params.append('sortOrder', sortOrder);
+      }
+
+      // ✅ Smart logic: load ALL rows only on first fetch with no filters/sorting
+      const forceAll = currentPage === 0 && currentPageSize === 10 && Object.values(columnSearch).every(v => !v) && !sortColumn;
+      params.append('limit', forceAll ? 'all' : currentPageSize.toString());
+      params.append('offset', (currentPage * currentPageSize).toString());
+
+      const response = await fetch(`http://localhost:3001/api/data?${params.toString()}`);
       const result = await response.json();
       setData(result.data || []);
       setTotal(result.total || 0);
@@ -26,11 +55,24 @@ const DataTable: React.FC = () => {
       console.error('❌ Error fetching data:', err);
       setData([]);
     }
-  }, [page, pageSize]);
+  };
+
+  useImperativeHandle(ref, () => ({
+    refresh: () => {
+      fetchData();
+    },
+  }));
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [page, pageSize, sortColumn, sortOrder]);
+
+  useEffect(() => {
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(() => {
+      fetchData();
+    }, 400);
+  }, [columnSearch]);
 
   const handleEdit = (rowId: string, columnId: string, value: string) => {
     const key = `${rowId}_${columnId}`;
@@ -39,7 +81,6 @@ const DataTable: React.FC = () => {
 
   const handleSave = async () => {
     const updatedRows: Record<string, any> = {};
-
     Object.keys(editedCells).forEach((key) => {
       const [id, column] = key.split('_');
       if (!updatedRows[id]) updatedRows[id] = { id };
@@ -77,24 +118,42 @@ const DataTable: React.FC = () => {
     link.click();
   };
 
+  const toggleSortOrder = () => {
+    setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+  };
+
   const columns: Column<RecordType>[] = useMemo(() => {
     if (data.length === 0) return [];
+
     return Object.keys(data[0]).map((key) => ({
       Header: () => (
         <div className="flex flex-col">
-          <span className="flex items-center gap-1">
-            {key.toUpperCase()}
-            <ChevronUp className="w-3 h-3 text-gray-500 inline-block" />
-            <ChevronDown className="w-3 h-3 text-gray-500 inline-block -mt-1" />
-          </span>
+          <div className="flex justify-between items-center mb-1">
+            <span className="font-semibold text-sm">{key.toUpperCase()}</span>
+            <button
+              onClick={() => {
+                setSortColumn(key);
+                toggleSortOrder();
+              }}
+              className="text-gray-500 hover:text-black"
+              title="Sort"
+            >
+              {sortColumn === key ? (
+                sortOrder === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronUp className="w-4 h-4 opacity-25" />
+              )}
+            </button>
+          </div>
           <input
+            key={`search-${key}`}
             type="text"
             placeholder={`Search ${key}`}
             value={columnSearch[key] || ''}
             onChange={(e) =>
               setColumnSearch((prev) => ({ ...prev, [key]: e.target.value }))
             }
-            className="text-xs border px-1 py-0.5 mt-1 rounded"
+            className="text-xs border px-1 py-0.5 rounded"
           />
         </div>
       ),
@@ -125,7 +184,7 @@ const DataTable: React.FC = () => {
         );
       },
     }));
-  }, [data, editedCells, editingCell, columnSearch]);
+  }, [data, editedCells, editingCell, columnSearch, sortColumn, sortOrder]);
 
   const {
     getTableProps,
@@ -133,153 +192,98 @@ const DataTable: React.FC = () => {
     headerGroups,
     prepareRow,
     rows,
-  } = useTable({ columns, data }, useSortBy);
+  } = useTable({ columns, data });
 
   const totalPages = Math.ceil(total / pageSize);
 
   return (
     <div className="w-full px-4 py-6 bg-white rounded-xl shadow space-y-4">
-      <div className="flex gap-4">
-        <button
-          onClick={handleSave}
-          className="bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200 text-sm font-medium"
-        >
-          Save
-        </button>
-        <button
-          onClick={handleDownload}
-          className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded hover:bg-yellow-200 text-sm font-medium"
-        >
-          Download
-        </button>
+      <div className="flex gap-10 items-start mt-4">
+        <div className="flex flex-col items-center">
+          <button
+            onClick={handleSave}
+            className="bg-green-100 text-green-800 px-5 py-2 rounded-lg hover:bg-green-200 text-sm font-semibold tracking-wide transition-all shadow-sm"
+          >
+            💾 Save
+          </button>
+          <span className="mt-2 text-xs text-gray-500 font-medium tracking-normal italic text-center">
+            Save updated changes in text file
+          </span>
+        </div>
+        <div className="flex flex-col items-center">
+          <button
+            onClick={handleDownload}
+            className="bg-yellow-100 text-yellow-800 px-5 py-2 rounded-lg hover:bg-yellow-200 text-sm font-semibold tracking-wide transition-all shadow-sm"
+          >
+            ⬇️ Download
+          </button>
+          <span className="mt-2 text-xs text-gray-500 font-medium tracking-normal italic text-center">
+            Download the latest text file
+          </span>
+        </div>
       </div>
 
-      <div className="overflow-x-auto max-h-[70vh] overflow-y-auto border rounded-lg">
-        <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50 sticky top-0 z-10">
-            {headerGroups.map((headerGroup, i) => (
-              <tr {...headerGroup.getHeaderGroupProps()} key={i}>
-                {headerGroup.headers.map((column, j) => (
-                  <th
-                    {...column.getHeaderProps((column as any).getSortByToggleProps?.())}
-                    key={j}
-                    className="px-3 py-2 text-left text-xs font-semibold text-gray-700"
-                  >
-                    {column.render('Header')}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody {...getTableBodyProps()} className="bg-white divide-y divide-gray-100">
-            {rows.map((row, rowIndex) => {
-              prepareRow(row);
-              return (
-                <tr {...row.getRowProps()} key={rowIndex}>
-                  {row.cells.map((cell, cellIndex) => (
-                    <td
-                      {...cell.getCellProps()}
-                      key={cellIndex}
-                      className="px-3 py-2"
-                    >
-                      {cell.render('Cell')}
-                    </td>
+      {columns.length > 0 ? (
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto border rounded-lg">
+          <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50 sticky top-0 z-10">
+              {headerGroups.map((headerGroup, i) => (
+                <tr {...headerGroup.getHeaderGroupProps()} key={i}>
+                  {headerGroup.headers.map((column, j) => (
+                    <th {...column.getHeaderProps()} key={j} className="px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                      {column.render('Header')}
+                    </th>
                   ))}
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </thead>
+            <tbody {...getTableBodyProps()} className="bg-white divide-y divide-gray-100">
+              {rows.map((row, rowIndex) => {
+                prepareRow(row);
+                return (
+                  <tr {...row.getRowProps()} key={rowIndex}>
+                    {row.cells.map((cell, cellIndex) => (
+                      <td {...cell.getCellProps()} key={cellIndex} className="px-3 py-2">
+                        {cell.render('Cell')}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="text-gray-500 italic text-sm mt-4">No records available.</div>
+      )}
 
-      {/* Pagination Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 text-sm text-gray-700">
-        {/* Page size selector */}
-        <div className="flex items-center gap-2">
-          <label htmlFor="pageSize">Rows per page:</label>
-          <select
-            id="pageSize"
-            className="border px-2 py-1 rounded"
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
-              setPage(0);
-            }}
-          >
-            {[10, 20, 50, 100, 200].map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
+      <div className="flex justify-between mt-4 text-sm text-gray-700">
+        <div className="flex gap-2 items-center">
+          Rows:
+          <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }} className="border px-2 py-1 rounded">
+            {[10, 20, 50, 100].map((size) => (<option key={size} value={size}>{size}</option>))}
           </select>
         </div>
-
-        {/* Center pagination */}
-        <div className="flex items-center gap-2 mx-auto">
-          <button
-            onClick={() => setPage(0)}
-            disabled={page === 0}
-            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
-          >
-            ⏮️
-          </button>
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
-          >
-            ◀️
-          </button>
-
-          <span className="font-medium">
-            Page {page + 1} of {totalPages}
-          </span>
-
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={page + 1 >= totalPages}
-            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
-          >
-            ▶️
-          </button>
-          <button
-            onClick={() => setPage(totalPages - 1)}
-            disabled={page + 1 >= totalPages}
-            className="text-gray-600 hover:text-blue-600 disabled:opacity-40"
-          >
-            ⏭️
-          </button>
-        </div>
-
-        {/* Manual go to page */}
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={1}
-            max={totalPages}
-            value={gotoPage}
-            onChange={(e) => setGotoPage(e.target.value)}
-            className="w-16 px-2 py-1 border rounded text-sm"
-            placeholder="Go to"
-          />
-          <button
-            onClick={() => {
-              const parsed = parseInt(gotoPage);
-              if (!isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
-                setPage(parsed - 1);
-                setGotoPage('');
-              } else {
-                alert('Invalid page number');
-              }
-            }}
-            className="px-2 py-1 bg-blue-50 hover:bg-blue-200 text-blue-800 rounded text-sm font-medium"
-          >
-            Go
-          </button>
+          <button onClick={() => setPage(0)} disabled={page === 0}>⏮️</button>
+          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>◀️</button>
+          <span>Page {page + 1} of {totalPages}</span>
+          <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page + 1 >= totalPages}>▶️</button>
+          <button onClick={() => setPage(totalPages - 1)} disabled={page + 1 >= totalPages}>⏭️</button>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="number" value={gotoPage} onChange={(e) => setGotoPage(e.target.value)} className="w-16 px-2 py-1 border rounded" placeholder="Go to" />
+          <button onClick={() => {
+            const pg = parseInt(gotoPage);
+            if (!isNaN(pg) && pg > 0 && pg <= totalPages) {
+              setPage(pg - 1);
+              setGotoPage('');
+            }
+          }} className="bg-blue-100 hover:bg-blue-200 text-blue-800 px-2 py-1 rounded">Go</button>
         </div>
       </div>
     </div>
   );
-};
+});
 
 export default DataTable;

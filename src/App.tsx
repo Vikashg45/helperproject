@@ -1,18 +1,19 @@
-import React, { useState } from 'react';
+// App.tsx
+import React, { useRef } from 'react';
 import FileUpload from './components/FileUpload';
-import DataTable from './components/DataTable';
+import DataTable, { DataTableHandle } from './components/DataTable';
 
-const App: React.FC = () => {
-  const [refreshKey, setRefreshKey] = useState(0);
+const App = () => {
+  const dataTableRef = useRef<DataTableHandle>(null);
 
-  const triggerRefresh = () => {
-    setRefreshKey(prev => prev + 1); // force DataTable to re-fetch
+  const handleUploadSuccess = () => {
+    dataTableRef.current?.refresh(); // 🔁 reload table after file upload
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 space-y-6">
-      <FileUpload onUpload={triggerRefresh} />
-      <DataTable key={refreshKey} />
+    <div className="p-4 space-y-6 max-w-7xl mx-auto">
+      <FileUpload onUpload={handleUploadSuccess} />
+      <DataTable ref={dataTableRef} />
     </div>
   );
 };

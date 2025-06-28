@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "helperproject",
+        "title": "SBD File Utility",
         "width": 800,
         "height": 600
       }

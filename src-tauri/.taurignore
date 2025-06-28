@@ -1,0 +1,4 @@
+backend/*.db*
+backend/*.sqlite*
+*.db
+*.db-journal
