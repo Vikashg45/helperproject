@@ -1,4 +1,6 @@
-backend/*.db*
-backend/*.sqlite*
+# Ignore everything in backend folder
+backend/**
+
+# Ignore any DB and journal files anywhere
 *.db
 *.db-journal

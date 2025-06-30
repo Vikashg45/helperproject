@@ -45,6 +45,25 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
       setIsUploading(true);
       setProgress(0);
 
+      // ✅ Wait for backend to be ready
+      let ready = false;
+      for (let i = 0; i < 10; i++) {
+        try {
+          const ping = await fetch('http://localhost:3001/api/record-count');
+          if (ping.ok) {
+            ready = true;
+            break;
+          }
+        } catch {
+          // Wait 500ms before retrying
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      if (!ready) {
+        throw new Error('Backend server did not start.');
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 
@@ -53,14 +72,17 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
         body: formData
       });
 
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Upload failed: ${errText}`);
+      }
 
       setMessage('✅ File uploaded successfully!');
-      onUpload?.(); // ✅ reload table
-      fetchRecordCount();
-    } catch (err) {
+      await fetchRecordCount();
+      onUpload?.();
+    } catch (err: any) {
       console.error(err);
-      setMessage('❌ Upload failed');
+      setMessage(`❌ Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
       setProgress(100);
@@ -81,8 +103,8 @@ const FileUpload: React.FC<Props> = ({ onUpload }) => {
       setMessage('✅ Deleted all records');
       setFile(null);
       (document.querySelector('input[type="file"]') as HTMLInputElement).value = '';
-      onUpload?.(); // ✅ reload table after clear
-      fetchRecordCount();
+      await fetchRecordCount();
+      onUpload?.();
     } catch (err) {
       console.error(err);
       setMessage('❌ Failed to delete data');

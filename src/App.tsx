@@ -1,5 +1,5 @@
 // App.tsx
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import FileUpload from './components/FileUpload';
 import DataTable, { DataTableHandle } from './components/DataTable';
 
